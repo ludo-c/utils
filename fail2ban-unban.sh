@@ -1,7 +1,8 @@
 #!/bin/sh
 # Remove an IP blocked by fail2ban.
 
-chain="f2b-sshd"
+chain="f2b-SSH"
+jail="sshd"
 
 if [ "${USER}" != "root" ]; then
 	echo "you must be root (or use sudo)"
@@ -27,7 +28,9 @@ else
 	echo -n "Are you sure (yes/NO) ? "
 	read dummy
 	if [ "${dummy}" = "yes" ]; then
-		iptables -D ${chain} ${number}
+		#iptables -D ${chain} ${number}
+		#[ $? -eq 0 ] && echo "successfully removed" || echo "error while removing iptables rule"
+		fail2ban-client set ${jail} unbanip $1
 		[ $? -eq 0 ] && echo "successfully removed" || echo "error while removing iptables rule"
 	else
 		echo "Abort"
