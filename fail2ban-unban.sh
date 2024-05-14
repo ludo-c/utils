@@ -1,7 +1,7 @@
 #!/bin/sh
 # Remove an IP blocked by fail2ban.
 
-chain="f2b-SSH"
+chain="f2b-sshd"
 jail="sshd"
 
 if [ "${USER}" != "root" ]; then
