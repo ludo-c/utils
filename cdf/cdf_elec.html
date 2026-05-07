@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="light">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestionnaire de Multiprise</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://cdn.jsdelivr.net/npm/drag-drop-touch@1.3.0/DragDropTouch.min.js"></script>
+    <style>
+        body header,
+        body main {
+            padding: 0px;
+        }
+
+        h1, h2 {
+            margin-bottom: 0;
+        }
+
+        .power-strip {
+            display: grid;
+            /* 2 colonnes par défaut, mais monte à 3 ou 4 si l'écran le permet */
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 5px;
+        }
+
+        .socket {
+            border: 3px dashed #ccc;
+            padding: 1rem;
+            border-radius: 10px;
+            min-height: 150px;
+            transition: all 0.3s ease;
+        }
+
+        .socket.over-limit {
+            border-color: #d81b60;
+            background-color: #fff1f0;
+        }
+
+        .socket.over-limit h4 {
+            color: #d81b60;
+        }
+
+        .device-card {
+            background: white;
+            padding: 8px;
+            margin: 0px 0;
+            cursor: grab;
+            touch-action: none;
+            user-select: none;
+            font-size: 0.85rem;
+            text-align: center;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+
+        }
+
+       .device-card strong {
+            line-height: 1rem;
+            /*
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            */
+        }
+
+        .device-list {
+            border: 1px solid #eee;
+            padding: 1rem;
+            min-height: 100px;
+        }
+
+        /* Grille d'appareils compacte */
+        .device-grid {
+            display: grid;
+            /* Crée autant de colonnes de 150px que possible */
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 10px;
+            background: #f0f2f5;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #d1d1d1;
+            min-height: 100px;
+        }
+
+        /* Supprime la marge sous le formulaire */
+        #device-form {
+            margin-bottom: 0.5rem;
+        }
+
+        /* Supprime la marge sous la section qui contient le catalogue */
+        section {
+            margin-bottom: 0.5rem;
+        }
+
+        .scenario-item {
+            display: inline-flex;
+            align-items: center;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn-delete {
+            background: #d81b60;
+            border: none;
+            padding: 2px 8px;
+            margin-left: -5px;
+            border-radius: 0 5px 5px 0;
+            cursor: pointer;
+        }
+
+        .btn-scenario {
+            border-radius: 5px 0 0 5px !important;
+        }
+
+        .socket, .device-list {
+            min-height: 120px;
+        }
+
+        /* Version plus petite des cartes d'appareils */
+        @media (max-width: 600px) {
+            .power-strip {
+                grid-template-columns: 1fr 1fr;
+                /* 2 colonnes sur petit mobile */
+            }
+            .device-grid {
+                grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            }
+        }
+
+    </style>
+</head>
+
+<body class="container-fluid">
+
+    <header>
+        <h1>Calculateur de Charge Multiprise</h1>
+        <p>Ajoutez vos appareils et glissez-les sur les prises (Max 3600W par prise).</p>
+    </header>
+
+    <main>
+        <form id="device-form" onsubmit="addDevice(event)">
+            <div class="grid">
+                <input type="text" id="dev-name" name="name" placeholder="Nom (ex: Grille-pain)" required>
+                <input type="number" id="dev-watts" name="watts" placeholder="Puissance (Watts)" required>
+                <button type="submit" class="contrast">Ajouter l'appareil</button>
+            </div>
+        </form>
+
+        <div class="grid">
+
+            <section id="catalogue-section">
+                <h2>Catalogue d'appareils</h2>
+                <div id="pool" class="device-grid" ondrop="drop(event)" ondragover="allowDrop(event)">
+                </div>
+            </section>
+
+
+            <section>
+                <h2>Le Bloc de 6 Prises</h2>
+                <div class="power-strip">
+                    <script>
+                        for (let i = 1; i <= 6; i++) {
+                            document.write(`
+                                <div class="socket" id="socket-${i}" ondrop="drop(event)" ondragover="allowDrop(event)">
+                                    <h4>Prise ${i}</h4>
+                                    <small class="load">Total: 0W (reste 3600W)</small>
+                                    <div class="content"></div>
+                                </div>
+                            `);
+                        }
+                    </script>
+                </div>
+            </section>
+        </div>
+        <div class="grid">
+            <input type="text" id="scenario-name" placeholder="Nom du scénario (ex: Hiver)">
+            <button onclick="saveScenario()" class="secondary">Enregistrer le Scénario</button>
+        </div>
+        <div id="scenario-list">
+        </div>
+    </main>
+
+    <script>
+    const CATALOGUE_APPAREILS = [
+        { name: "Barbe à papa", watts: 1080 },
+        { name: "Bouilloire (2200)", watts: 3600 },
+        { name: "Bubble gaufre", watts: 700 },
+        { name: "Cafetière (grosse)", watts: 1650 },
+        { name: "Cafetière (Senseo) 1", watts: 1450 },
+        { name: "Cafetière (Senseo) 2", watts: 1450 },
+        { name: "Cafetière (filtre)", watts: 850 },
+        { name: "Crepière grosse", watts: 3600 },
+        { name: "Crepière petite", watts: 1500 },
+        { name: "Crepière pan cakes", watts: 1000 },
+        { name: "Chargeur Tel", watts: 30 },
+        { name: "Chocolatière", watts: 1200 },
+        { name: "Congélateur", watts: 300 },
+        { name: "Croque Mr", watts: 1800 },
+        { name: "Friteuse", watts: 3600 },
+        { name: "Gaufrier 1", watts: 1500 },
+        { name: "Gaufrier 2", watts: 1500 },
+        { name: "Hot dog", watts: 800 },
+        { name: "Panini", watts: 3600 },
+        { name: "Plancha", watts: 2300 },
+        { name: "Pop corn", watts: 800 },
+        { name: "Tireuse à bière", watts: 2000 },
+    ];
+
+        // Charge la liste de gauche
+        function initCatalogue() {
+            const pool = document.getElementById('pool');
+            pool.innerHTML = '';
+
+
+            CATALOGUE_APPAREILS.forEach(item => {
+                pool.appendChild(createDeviceElement(item.name, item.watts));
+            });
+            sortPoolAlphabetically()
+        }
+
+        // Logique Drag & Drop
+        function allowDrop(ev) {
+            ev.preventDefault();
+        }
+
+        function drag(ev) {
+            ev.dataTransfer.setData("text", ev.target.id);
+        }
+
+        function drop(ev) {
+            ev.preventDefault();
+            const data = ev.dataTransfer.getData("text");
+            const device = document.getElementById(data);
+            let target = ev.target;
+
+            // Remonter jusqu'à la div de la prise si on lâche sur un enfant
+            while (target && !target.classList.contains('socket') && target.id !== 'pool') {
+                target = target.parentElement;
+            }
+
+            if (target.id === 'pool') {
+                target.appendChild(device);
+                sortPoolAlphabetically();
+            } else {
+                target.querySelector('.content').appendChild(device);
+            }
+
+            updateLoads();
+        }
+
+        // Mise à jour des calculs de puissance
+        function updateLoads() {
+            document.querySelectorAll('.socket').forEach(socket => {
+                let total = 0;
+                socket.querySelectorAll('.device-card').forEach(dev => {
+                    total += parseInt(dev.getAttribute('data-watts'));
+                });
+
+                const display = socket.querySelector('.load');
+                let reste = 3600 - total;
+                display.innerText = `Total: ${total}W (reste ${reste}W)`;
+
+                if (total > 3600) {
+                    socket.classList.add('over-limit');
+                } else {
+                    socket.classList.remove('over-limit');
+                }
+            });
+        }
+
+        // Ajouter un appareil dynamiquement
+        let deviceCount = 1;
+
+        function addDevice(e) {
+            e.preventDefault();
+            const nameInput = document.getElementById('dev-name');
+            const wattsInput = document.getElementById('dev-watts');
+
+            if (!nameInput.value || !wattsInput.value) return;
+
+            // 1. On ajoute au "modèle de données" (le tableau)
+            CATALOGUE_APPAREILS.push({
+                name: nameInput.value,
+                watts: parseInt(wattsInput.value)
+            });
+
+            // 2. On rafraîchit la vue (le tri est géré dans initCatalogue)
+            initCatalogue();
+
+            // 3. Reset
+            nameInput.value = '';
+            wattsInput.value = '';
+            nameInput.focus();
+            sortPoolAlphabetically();
+        }
+
+
+
+        // Sauvegarder l'état actuel
+        function saveScenario() {
+            const name = document.getElementById('scenario-name').value || "Sans titre";
+            const sockets = [];
+
+            document.querySelectorAll('.socket').forEach((socket, index) => {
+                const devices = [];
+                socket.querySelectorAll('.device-card').forEach(dev => {
+                    devices.push({
+                        name: dev.getAttribute('data-name'), // On récupère le nom propre
+                        watts: dev.getAttribute('data-watts'),
+                        id: dev.id
+                    });
+                });
+                sockets.push({
+                    id: index,
+                    devices: devices
+                });
+            });
+
+            const scenarios = JSON.parse(localStorage.getItem('power_scenarios') || '{}');
+            scenarios[name] = sockets;
+            localStorage.setItem('power_scenarios', JSON.stringify(scenarios));
+            renderScenarioButtons();
+        }
+
+        // Charger un scénario
+        function loadScenario(name) {
+            const scenarios = JSON.parse(localStorage.getItem('power_scenarios'));
+            const scenario = scenarios[name];
+
+            // Nettoyage des prises
+            document.querySelectorAll('.socket .content').forEach(c => c.innerHTML = '');
+
+            scenario.forEach((s, index) => {
+                const socketDiv = document.querySelectorAll('.socket .content')[index];
+                s.devices.forEach(d => {
+                    // d.name et d.watts proviennent du JSON sauvegardé
+                    const devEl = createDeviceElement(d.name, d.watts, d.id);
+                    socketDiv.appendChild(devEl);
+                });
+            });
+            updateLoads();
+        }
+
+        function renderScenarioButtons() {
+            const scenarios = JSON.parse(localStorage.getItem('power_scenarios') || '{}');
+            const container = document.getElementById('scenario-list');
+            container.innerHTML = '<strong>Scénarios : </strong><br>';
+
+            Object.keys(scenarios).forEach(name => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'scenario-item';
+
+                // Bouton pour charger
+                const btnLoad = document.createElement('button');
+                btnLoad.innerText = name;
+                btnLoad.className = "outline btn-scenario";
+                btnLoad.onclick = () => loadScenario(name);
+
+                // Bouton pour supprimer
+                const btnDel = document.createElement('button');
+                btnDel.innerHTML = "&times;"; // Le signe multiplication 'x'
+                btnDel.className = "btn-delete";
+                btnDel.onclick = (e) => deleteScenario(name, e);
+
+                wrapper.appendChild(btnLoad);
+                wrapper.appendChild(btnDel);
+                container.appendChild(wrapper);
+            });
+        }
+
+        /**
+         * Crée l'élément DOM d'un appareil (utilisé par l'ajout manuel et le chargement)
+         */
+        function createDeviceElement(label, watts, id = null) {
+            const div = document.createElement('div');
+            div.className = 'device-card';
+            div.draggable = true;
+
+            const safeName = label.replace(/[^a-z0-9]/gi, '-').toLowerCase();
+            div.id = id || `dev-${safeName}-${Math.random().toString(36).substr(2, 5)}`;
+
+            div.setAttribute('data-watts', watts);
+            div.setAttribute('data-name', label);
+
+            // Mise en page : Nom en gras, Watts en dessous en petit
+            div.innerHTML = `<strong>${label}</strong><small>${watts}W</small>`;
+
+            div.ondragstart = drag;
+            return div;
+        }
+
+        /**
+         * Version mise à jour de addDevice
+         */
+        function addDevice(e) {
+            e.preventDefault();
+            const nameInput = document.getElementById('dev-name');
+            const wattsInput = document.getElementById('dev-watts');
+
+            const deviceEl = createDeviceElement(nameInput.value, wattsInput.value);
+
+            document.getElementById('pool').appendChild(deviceEl);
+
+            // Reset du formulaire
+            nameInput.value = '';
+            wattsInput.value = '';
+            nameInput.focus();
+        }
+
+        // Appeler au chargement
+        window.onload = function(e) {
+            renderScenarioButtons();
+            initCatalogue()
+        };
+
+        function deleteScenario(name, event) {
+            // Empêche le clic de déclencher aussi le chargement du scénario
+            event.stopPropagation();
+
+            if (confirm(`Supprimer le scénario "${name}" ?`)) {
+                const scenarios = JSON.parse(localStorage.getItem('power_scenarios') || '{}');
+                delete scenarios[name];
+                localStorage.setItem('power_scenarios', JSON.stringify(scenarios));
+                renderScenarioButtons();
+            }
+        }
+
+        function sortPoolAlphabetically() {
+            const pool = document.getElementById('pool');
+            const devices = Array.from(pool.getElementsByClassName('device-card'));
+
+            // Tri des éléments DOM basés sur l'attribut data-name
+            devices.sort((a, b) => {
+                const nameA = a.getAttribute('data-name').toLowerCase();
+                const nameB = b.getAttribute('data-name').toLowerCase();
+                return nameA.localeCompare(nameB);
+            });
+
+            // On ré-injecte les éléments dans le bon ordre
+            devices.forEach(device => pool.appendChild(device));
+        }
+
+
+
+
+        // Auto-scroll pendant le drag
+        let scrollInterval;
+        document.addEventListener('dragover', (e) => {
+            clearInterval(scrollInterval);
+            const threshold = 100; // Distance du bord en pixels
+            const speed = 15; // Vitesse du scroll
+
+            if (e.clientY < threshold) {
+                scrollInterval = setInterval(() => window.scrollBy(0, -speed), 10);
+            } else if (e.clientY > window.innerHeight - threshold) {
+                scrollInterval = setInterval(() => window.scrollBy(0, speed), 10);
+            }
+        });
+
+        document.addEventListener('dragend', () => clearInterval(scrollInterval));
+        document.addEventListener('drop', () => clearInterval(scrollInterval));
+    </script>
+</body>
+
+</html>
