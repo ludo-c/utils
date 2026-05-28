@@ -227,7 +227,7 @@
         }
 
         function drag(ev) {
-            ev.dataTransfer.setData("text", ev.target.id);
+            ev.dataTransfer.setData('text/plain', ev.target.id);
         }
 
         function drop(ev) {
@@ -240,6 +240,7 @@
             while (target && !target.classList.contains('socket') && target.id !== 'pool') {
                 target = target.parentElement;
             }
+            if (!target) return;
 
             if (target.id === 'pool') {
                 target.appendChild(device);
@@ -256,18 +257,13 @@
             document.querySelectorAll('.socket').forEach(socket => {
                 let total = 0;
                 socket.querySelectorAll('.device-card').forEach(dev => {
-                    total += parseInt(dev.getAttribute('data-watts'));
+                    total += parseInt(dev.getAttribute('data-watts'), 10) || 0;
                 });
 
                 const display = socket.querySelector('.load');
-                let reste = 3600 - total;
-                display.innerText = `Total: ${total}W (reste ${reste}W)`;
-
-                if (total > 3600) {
-                    socket.classList.add('over-limit');
-                } else {
-                    socket.classList.remove('over-limit');
-                }
+                const reste = 3600 - total;
+                display.textContent = `Total: ${total}W (reste ${reste}W)`;
+                socket.classList.toggle('over-limit', total > 3600);
             });
         }
 
