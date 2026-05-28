@@ -333,21 +333,43 @@
 
         // Charger un scénario
         function loadScenario(name) {
-            const scenarios = JSON.parse(localStorage.getItem('power_scenarios'));
+            const scenarios = JSON.parse(localStorage.getItem('power_scenarios') || '{}');
             const scenario = scenarios[name];
+            if (!scenario) return;
 
-            // Nettoyage des prises
+            // Nettoyage des prises et reconstruction du catalogue
             document.querySelectorAll('.socket .content').forEach(c => c.innerHTML = '');
+            initCatalogue();
 
             scenario.forEach((s, index) => {
                 const socketDiv = document.querySelectorAll('.socket .content')[index];
                 s.devices.forEach(d => {
-                    // d.name et d.watts proviennent du JSON sauvegardé
+                    removeDeviceFromPool(d);
                     const devEl = createDeviceElement(d.name, d.watts, d.id);
                     socketDiv.appendChild(devEl);
                 });
             });
+
+            sortPoolAlphabetically();
             updateLoads();
+        }
+
+        function removeDeviceFromPool(device) {
+            const pool = document.getElementById('pool');
+            let element = device.id ? document.getElementById(device.id) : null;
+
+            if (element && pool.contains(element)) {
+                element.remove();
+                return;
+            }
+
+            const match = Array.from(pool.querySelectorAll('.device-card')).find(el => {
+                return el.getAttribute('data-name') === device.name && el.getAttribute('data-watts') === device.watts;
+            });
+
+            if (match) {
+                match.remove();
+            }
         }
 
         function renderScenarioButtons() {
@@ -396,24 +418,6 @@
 
             div.ondragstart = drag;
             return div;
-        }
-
-        /**
-         * Version mise à jour de addDevice
-         */
-        function addDevice(e) {
-            e.preventDefault();
-            const nameInput = document.getElementById('dev-name');
-            const wattsInput = document.getElementById('dev-watts');
-
-            const deviceEl = createDeviceElement(nameInput.value, wattsInput.value);
-
-            document.getElementById('pool').appendChild(deviceEl);
-
-            // Reset du formulaire
-            nameInput.value = '';
-            wattsInput.value = '';
-            nameInput.focus();
         }
 
         // Appeler au chargement
