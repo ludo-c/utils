@@ -114,10 +114,6 @@
             border-radius: 5px 0 0 5px !important;
         }
 
-        .socket {
-            min-height: 120px;
-        }
-
         /* Version plus petite des cartes d'appareils */
         @media (max-width: 600px) {
             .power-strip {
@@ -159,19 +155,7 @@
 
             <section>
                 <h2>Le Bloc de 6 Prises</h2>
-                <div class="power-strip">
-                    <script>
-                        for (let i = 1; i <= 6; i++) {
-                            document.write(`
-                                <div class="socket" id="socket-${i}" ondrop="drop(event)" ondragover="allowDrop(event)">
-                                    <h4>Prise ${i}</h4>
-                                    <small class="load">Total: 0W (reste 3600W)</small>
-                                    <div class="content"></div>
-                                </div>
-                            `);
-                        }
-                    </script>
-                </div>
+                <div class="power-strip" id="power-strip"></div>
             </section>
         </div>
         <div class="grid">
@@ -183,7 +167,9 @@
     </main>
 
     <script>
-    const CATALOGUE_APPAREILS = [
+        const MAX_LOAD = 3600;
+        const SCENARIOS_KEY = 'power_scenarios';
+        const CATALOGUE_APPAREILS = [
         { name: "Barbe à papa", watts: 1080 },
         { name: "Bouilloire (2200)", watts: 3600 },
         { name: "Bubble gaufre", watts: 700 },
@@ -214,11 +200,32 @@
             const pool = document.getElementById('pool');
             pool.innerHTML = '';
 
-
             CATALOGUE_APPAREILS.forEach(item => {
                 pool.appendChild(createDeviceElement(item.name, item.watts));
             });
-            sortPoolAlphabetically()
+            sortPoolAlphabetically();
+        }
+
+        const getSavedScenarios = () => JSON.parse(localStorage.getItem(SCENARIOS_KEY) || '{}');
+        const saveScenarios = (scenarios) => localStorage.setItem(SCENARIOS_KEY, JSON.stringify(scenarios));
+
+        function initSockets(count = 6) {
+            const strip = document.getElementById('power-strip');
+            strip.innerHTML = '';
+
+            for (let i = 1; i <= count; i++) {
+                const socket = document.createElement('div');
+                socket.className = 'socket';
+                socket.id = `socket-${i}`;
+                socket.ondrop = drop;
+                socket.ondragover = allowDrop;
+                socket.innerHTML = `
+                    <h4>Prise ${i}</h4>
+                    <small class="load">Total: 0W (reste ${MAX_LOAD}W)</small>
+                    <div class="content"></div>
+                `;
+                strip.appendChild(socket);
+            }
         }
 
         // Logique Drag & Drop
@@ -227,7 +234,7 @@
         }
 
         function drag(ev) {
-            ev.dataTransfer.setData('text/plain', ev.target.id);
+            ev.dataTransfer.setData("text", ev.target.id);
         }
 
         function drop(ev) {
@@ -240,7 +247,6 @@
             while (target && !target.classList.contains('socket') && target.id !== 'pool') {
                 target = target.parentElement;
             }
-            if (!target) return;
 
             if (target.id === 'pool') {
                 target.appendChild(device);
@@ -255,21 +261,19 @@
         // Mise à jour des calculs de puissance
         function updateLoads() {
             document.querySelectorAll('.socket').forEach(socket => {
-                let total = 0;
-                socket.querySelectorAll('.device-card').forEach(dev => {
-                    total += parseInt(dev.getAttribute('data-watts'), 10) || 0;
-                });
+                const total = Array.from(socket.querySelectorAll('.device-card')).reduce(
+                    (sum, dev) => sum + Number(dev.dataset.watts),
+                    0
+                );
 
                 const display = socket.querySelector('.load');
-                const reste = 3600 - total;
-                display.textContent = `Total: ${total}W (reste ${reste}W)`;
-                socket.classList.toggle('over-limit', total > 3600);
+                const reste = MAX_LOAD - total;
+                display.innerText = `Total: ${total}W (reste ${reste}W)`;
+                socket.classList.toggle('over-limit', total > MAX_LOAD);
             });
         }
 
         // Ajouter un appareil dynamiquement
-        let deviceCount = 1;
-
         function addDevice(e) {
             e.preventDefault();
             const nameInput = document.getElementById('dev-name');
@@ -280,7 +284,7 @@
             // 1. On ajoute au "modèle de données" (le tableau)
             CATALOGUE_APPAREILS.push({
                 name: nameInput.value,
-                watts: parseInt(wattsInput.value)
+                watts: Number(wattsInput.value)
             });
 
             // 2. On rafraîchit la vue (le tri est géré dans initCatalogue)
@@ -290,80 +294,60 @@
             nameInput.value = '';
             wattsInput.value = '';
             nameInput.focus();
-            sortPoolAlphabetically();
         }
 
 
 
         // Sauvegarder l'état actuel
         function saveScenario() {
-            const name = document.getElementById('scenario-name').value || "Sans titre";
-            const sockets = [];
+            const name = document.getElementById('scenario-name').value.trim() || "Sans titre";
+            const sockets = Array.from(document.querySelectorAll('.socket')).map((socket, index) => ({
+                id: index,
+                devices: Array.from(socket.querySelectorAll('.device-card')).map(dev => ({
+                    name: dev.dataset.name,
+                    watts: dev.dataset.watts,
+                    id: dev.id
+                }))
+            }));
 
-            document.querySelectorAll('.socket').forEach((socket, index) => {
-                const devices = [];
-                socket.querySelectorAll('.device-card').forEach(dev => {
-                    devices.push({
-                        name: dev.getAttribute('data-name'), // On récupère le nom propre
-                        watts: dev.getAttribute('data-watts'),
-                        id: dev.id
-                    });
-                });
-                sockets.push({
-                    id: index,
-                    devices: devices
-                });
-            });
-
-            const scenarios = JSON.parse(localStorage.getItem('power_scenarios') || '{}');
+            const scenarios = getSavedScenarios();
             scenarios[name] = sockets;
-            localStorage.setItem('power_scenarios', JSON.stringify(scenarios));
+            saveScenarios(scenarios);
             renderScenarioButtons();
         }
 
         // Charger un scénario
         function loadScenario(name) {
-            const scenarios = JSON.parse(localStorage.getItem('power_scenarios') || '{}');
+            const scenarios = getSavedScenarios();
             const scenario = scenarios[name];
             if (!scenario) return;
 
-            // Nettoyage des prises et reconstruction du catalogue
-            document.querySelectorAll('.socket .content').forEach(c => c.innerHTML = '');
+            document.getElementById('scenario-name').value = name;
+
+            const socketContents = Array.from(document.querySelectorAll('.socket .content'));
+            socketContents.forEach(content => { content.innerHTML = ''; });
+
             initCatalogue();
 
             scenario.forEach((s, index) => {
-                const socketDiv = document.querySelectorAll('.socket .content')[index];
+                const socketDiv = socketContents[index];
                 s.devices.forEach(d => {
-                    removeDeviceFromPool(d);
-                    const devEl = createDeviceElement(d.name, d.watts, d.id);
-                    socketDiv.appendChild(devEl);
+                    const poolDevice = Array.from(document.querySelectorAll('#pool .device-card')).find(
+                        dev => dev.dataset.name === d.name && dev.dataset.watts === String(d.watts)
+                    );
+
+                    if (poolDevice) {
+                        socketDiv.appendChild(poolDevice);
+                    } else {
+                        socketDiv.appendChild(createDeviceElement(d.name, d.watts, d.id));
+                    }
                 });
             });
-
-            sortPoolAlphabetically();
             updateLoads();
         }
 
-        function removeDeviceFromPool(device) {
-            const pool = document.getElementById('pool');
-            let element = device.id ? document.getElementById(device.id) : null;
-
-            if (element && pool.contains(element)) {
-                element.remove();
-                return;
-            }
-
-            const match = Array.from(pool.querySelectorAll('.device-card')).find(el => {
-                return el.getAttribute('data-name') === device.name && el.getAttribute('data-watts') === device.watts;
-            });
-
-            if (match) {
-                match.remove();
-            }
-        }
-
         function renderScenarioButtons() {
-            const scenarios = JSON.parse(localStorage.getItem('power_scenarios') || '{}');
+            const scenarios = getSavedScenarios();
             const container = document.getElementById('scenario-list');
             container.innerHTML = '<strong>Scénarios : </strong><br>';
 
@@ -398,10 +382,10 @@
             div.draggable = true;
 
             const safeName = label.replace(/[^a-z0-9]/gi, '-').toLowerCase();
-            div.id = id || `dev-${safeName}-${Math.random().toString(36).substr(2, 5)}`;
+            div.id = id || `dev-${safeName}-${Math.random().toString(36).slice(2, 7)}`;
 
-            div.setAttribute('data-watts', watts);
-            div.setAttribute('data-name', label);
+            div.dataset.watts = watts;
+            div.dataset.name = label;
 
             // Mise en page : Nom en gras, Watts en dessous en petit
             div.innerHTML = `<strong>${label}</strong><small>${watts}W</small>`;
@@ -411,19 +395,20 @@
         }
 
         // Appeler au chargement
-        window.onload = function(e) {
+        document.addEventListener('DOMContentLoaded', () => {
+            initSockets();
             renderScenarioButtons();
-            initCatalogue()
-        };
+            initCatalogue();
+        });
 
         function deleteScenario(name, event) {
             // Empêche le clic de déclencher aussi le chargement du scénario
             event.stopPropagation();
 
             if (confirm(`Supprimer le scénario "${name}" ?`)) {
-                const scenarios = JSON.parse(localStorage.getItem('power_scenarios') || '{}');
+                const scenarios = getSavedScenarios();
                 delete scenarios[name];
-                localStorage.setItem('power_scenarios', JSON.stringify(scenarios));
+                saveScenarios(scenarios);
                 renderScenarioButtons();
             }
         }
@@ -433,13 +418,7 @@
             const devices = Array.from(pool.getElementsByClassName('device-card'));
 
             // Tri des éléments DOM basés sur l'attribut data-name
-            devices.sort((a, b) => {
-                const nameA = a.getAttribute('data-name').toLowerCase();
-                const nameB = b.getAttribute('data-name').toLowerCase();
-                return nameA.localeCompare(nameB);
-            });
-
-            // On ré-injecte les éléments dans le bon ordre
+            devices.sort((a, b) => a.dataset.name.toLowerCase().localeCompare(b.dataset.name.toLowerCase()));
             devices.forEach(device => pool.appendChild(device));
         }
 
